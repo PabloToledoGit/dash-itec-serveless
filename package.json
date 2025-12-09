@@ -4,6 +4,9 @@
   "private": true,
   "type": "module",
   "license": "MIT",
+  "engines": {
+    "node": "20.x"
+  },
   "dependencies": {
     "firebase-admin": "^12.5.0"
   },
