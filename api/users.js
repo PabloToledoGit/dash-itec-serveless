@@ -1,4 +1,4 @@
-// api/users.js
+// /api/users.js
 import { getAdminDb, assertApiKey } from "./admin.js";
 
 /**
@@ -10,9 +10,31 @@ import { getAdminDb, assertApiKey } from "./admin.js";
  *  - sortDir ("asc" | "desc", default "desc")
  *  - q (filtro de substring aplicado em memória na página retornada)
  */
+
+// --- Middleware CORS (Node) ---
+function applyCors(req, res) {
+  const origin = req.headers.origin || "*";
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "x-api-key, content-type");
+
+  if (req.method === "OPTIONS") {
+    res.status(204).end();
+    return true;
+  }
+  return false;
+}
+
+// --- Handler principal ---
 export default async function handler(req, res) {
   try {
+    // ✅ Responder preflight antes de tudo
+    if (applyCors(req, res)) return;
+
+    // ✅ Verificação de chave API
     assertApiKey(req);
+
     const db = getAdminDb();
 
     const pageSize = Math.min(100, parseInt(req.query.pageSize || "25", 10));
@@ -40,7 +62,7 @@ export default async function handler(req, res) {
       const data = doc.data();
       const id = doc.id;
 
-      // Contagens por collectionGroup (custo por leitura; otimizar com agregados se necessário)
+      // 🔹 Contagens por collectionGroup
       const [agSnap, histAllSnap, histPendSnap] = await Promise.all([
         db.collectionGroup("agendamentos").where("idsAlunos", "array-contains", id).get(),
         db.collectionGroup("historico").where("userId", "==", id).get(),
@@ -60,7 +82,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Filtro simples em memória na página corrente
+    // 🔹 Filtro simples em memória
     const filtered = qtext
       ? users.filter(u =>
           [u.email, u.name, u.phone, u.source]
@@ -77,6 +99,8 @@ export default async function handler(req, res) {
     });
   } catch (err) {
     console.error("[/api/users] error:", err);
-    res.status(err.statusCode || 500).json({ error: err.message || "server_error" });
+    res
+      .status(err.statusCode || 500)
+      .json({ error: err.message || "server_error" });
   }
 }
