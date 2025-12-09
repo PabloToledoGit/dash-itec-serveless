@@ -1,5 +1,15 @@
+// api/users.js
 import { getAdminDb, assertApiKey } from "./_lib/admin.js";
 
+/**
+ * GET /api/users
+ * Query params:
+ *  - pageSize (default 25, máx. 100)
+ *  - pageToken (id do último doc)
+ *  - sortField (default "createdAt")
+ *  - sortDir ("asc" | "desc", default "desc")
+ *  - q (filtro de substring aplicado em memória na página retornada)
+ */
 export default async function handler(req, res) {
   try {
     assertApiKey(req);
@@ -11,7 +21,11 @@ export default async function handler(req, res) {
     const qtext = (req.query.q || "").toString().trim().toLowerCase();
     const pageToken = (req.query.pageToken || "").toString().trim();
 
-    const usersCol = db.collection("artifacts").doc("registro-itec-dcbc4").collection("users");
+    const usersCol = db
+      .collection("artifacts")
+      .doc("registro-itec-dcbc4")
+      .collection("users");
+
     let queryRef = usersCol.orderBy(sortField, sortDir).limit(pageSize);
 
     if (pageToken) {
@@ -26,6 +40,7 @@ export default async function handler(req, res) {
       const data = doc.data();
       const id = doc.id;
 
+      // Contagens por collectionGroup (custo por leitura; otimizar com agregados se necessário)
       const [agSnap, histAllSnap, histPendSnap] = await Promise.all([
         db.collectionGroup("agendamentos").where("idsAlunos", "array-contains", id).get(),
         db.collectionGroup("historico").where("userId", "==", id).get(),
@@ -45,12 +60,16 @@ export default async function handler(req, res) {
       });
     }
 
+    // Filtro simples em memória na página corrente
     const filtered = qtext
-      ? users.filter(u => [u.email, u.name, u.phone, u.source]
-          .some(v => String(v || "").toLowerCase().includes(qtext)))
+      ? users.filter(u =>
+          [u.email, u.name, u.phone, u.source]
+            .some(v => String(v || "").toLowerCase().includes(qtext))
+        )
       : users;
 
     const last = snap.docs[snap.docs.length - 1];
+
     res.status(200).json({
       items: filtered,
       nextPageToken: last ? last.id : null,
