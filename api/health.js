@@ -1,6 +1,5 @@
-// api/health.js
 export default async function handler(req, res) {
-  return res.status(200).json({
+  res.status(200).json({
     ok: true,
     node: process.version,
     hasApiKey: Boolean(process.env.API_KEY),

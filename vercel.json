@@ -1,13 +1,10 @@
 {
   "functions": {
     "api/**/*.js": {
-      "runtime": "nodejs20.x",
+      "runtime": "nodejs22.x",
       "memory": 1024,
-      "maxDuration": 10
+      "maxDuration": 15
     }
   },
-  "routes": [
-    { "src": "/api/(.*)", "dest": "/api/$1" }
-  ],
   "regions": ["gru1", "iad1"]
 }
