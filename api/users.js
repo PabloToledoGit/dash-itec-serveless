@@ -1,5 +1,5 @@
 // api/users.js
-import { getAdminDb, assertApiKey } from "./admin";
+import { getAdminDb, assertApiKey } from "./admin.js";
 
 /**
  * GET /api/users
