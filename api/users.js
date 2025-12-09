@@ -1,6 +1,5 @@
 // /api/users.js
-import { getAdminDb, assertApiKey } from "./admin.js";
-
+import { getAdminDb } from "./admin.js";
 
 /**
  * GET /api/users
@@ -10,15 +9,29 @@ import { getAdminDb, assertApiKey } from "./admin.js";
  *  - sortField (default "createdAt")
  *  - sortDir ("asc" | "desc", default "desc")
  *  - q (filtro de substring aplicado em memória na página retornada)
+ *
+ * Observação:
+ *  - Não há autenticação via x-api-key.
+ *  - Recomendado limitar origens com ORIGIN_ALLOWLIST.
  */
 
-// --- Middleware CORS (Node) ---
+// --- CORS (com allowlist simples por env)
 function applyCors(req, res) {
-  const origin = req.headers.origin || "*";
-  res.setHeader("Access-Control-Allow-Origin", origin);
+  const reqOrigin = req.headers.origin || "";
+  const allowlist = (process.env.ORIGIN_ALLOWLIST || "")
+    .split(",")
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  // Se não houver allowlist, libera amplo (dev). Em produção, configure ORIGIN_ALLOWLIST!
+  const allowOrigin = allowlist.length
+    ? (allowlist.includes(reqOrigin) ? reqOrigin : allowlist[0])
+    : (reqOrigin || "*");
+
+  res.setHeader("Access-Control-Allow-Origin", allowOrigin);
   res.setHeader("Vary", "Origin");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,PATCH,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "x-api-key, content-type");
+  res.setHeader("Access-Control-Allow-Methods", "GET,OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "content-type");
 
   if (req.method === "OPTIONS") {
     res.status(204).end();
@@ -27,15 +40,29 @@ function applyCors(req, res) {
   return false;
 }
 
-// --- Handler principal ---
+// Campos que vamos expor ao front (sanitização)
+function projectUser(u) {
+  return {
+    id: u.id,
+    email: u.email ?? null,
+    name: u.name ?? null,
+    phone: u.phone ?? null,
+    source: u.source ?? null,
+    createdAt: u.createdAt ?? null,
+    agCount: u.agCount ?? 0,
+    histTotal: u.histTotal ?? 0,
+    histPend: u.histPend ?? 0,
+  };
+}
+
 export default async function handler(req, res) {
+  if (applyCors(req, res)) return;
+
+  if (req.method !== "GET") {
+    return res.status(405).json({ error: "method_not_allowed" });
+  }
+
   try {
-    // ✅ Responder preflight antes de tudo
-    if (applyCors(req, res)) return;
-
-    // ✅ Verificação de chave API
-    assertApiKey(req);
-
     const db = getAdminDb();
 
     const pageSize = Math.min(100, parseInt(req.query.pageSize || "25", 10));
@@ -59,11 +86,12 @@ export default async function handler(req, res) {
     const snap = await queryRef.get();
     const users = [];
 
+    // Obs.: 3 consultas por usuário (agendamentos, historico total, historico pendente).
+    // Para alto volume, considere pré-agregar contagens.
     for (const doc of snap.docs) {
       const data = doc.data();
       const id = doc.id;
 
-      // 🔹 Contagens por collectionGroup
       const [agSnap, histAllSnap, histPendSnap] = await Promise.all([
         db.collectionGroup("agendamentos").where("idsAlunos", "array-contains", id).get(),
         db.collectionGroup("historico").where("userId", "==", id).get(),
@@ -83,7 +111,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // 🔹 Filtro simples em memória
+    // Filtro em memória (na página retornada)
     const filtered = qtext
       ? users.filter(u =>
           [u.email, u.name, u.phone, u.source]
@@ -94,14 +122,12 @@ export default async function handler(req, res) {
     const last = snap.docs[snap.docs.length - 1];
 
     res.status(200).json({
-      items: filtered,
+      items: filtered.map(projectUser),
       nextPageToken: last ? last.id : null,
       pageSize
     });
   } catch (err) {
     console.error("[/api/users] error:", err);
-    res
-      .status(err.statusCode || 500)
-      .json({ error: err.message || "server_error" });
+    res.status(500).json({ error: "server_error" });
   }
 }
