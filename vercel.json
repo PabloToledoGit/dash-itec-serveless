@@ -5,6 +5,5 @@
       "memory": 1024,
       "maxDuration": 15
     }
-  },
-  "regions": ["gru1", "iad1"]
+  }
 }
