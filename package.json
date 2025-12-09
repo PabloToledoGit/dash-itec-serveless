@@ -1,0 +1,17 @@
+{
+  "name": "registro-itec-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.5.0"
+  },
+  "scripts": {
+    "dev": "vercel dev",
+    "start": "node api/health.js"
+  }
+}
