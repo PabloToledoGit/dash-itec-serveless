@@ -1,4 +1,3 @@
-// api/_lib/admin.js
 import { initializeApp, getApps, cert } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
 
@@ -31,7 +30,21 @@ export function assertApiKey(req) {
     req.headers["X-API-Key"] ||
     req.headers["x-API-key"] ||
     "";
-  if (!process.env.API_KEY || provided !== process.env.API_KEY) {
+  
+  // ⬇️ INÍCIO DOS LOGS DE DEBUG ⬇️
+  const expected = process.env.API_KEY || "";
+  
+  console.log("--- API Key Debug ---");
+  // Exibe apenas o início da chave fornecida pelo cliente
+  console.log("Key Fornecida (Provided):", provided ? provided.slice(0, 8) + "..." : "[Vazio]"); 
+  // Exibe apenas o início da chave esperada do Vercel
+  console.log("Key Esperada (process.env):", expected ? expected.slice(0, 8) + "..." : "[UNDEFINED]"); 
+  // Resultado da comparação
+  console.log("Keys são idênticas? (boolean):", provided === expected);
+  console.log("--- FIM do Debug ---");
+  // ⬆️ FIM DOS LOGS DE DEBUG ⬆️
+
+  if (!expected || provided !== expected) {
     const err = new Error("Unauthorized");
     err.statusCode = 401;
     throw err;
