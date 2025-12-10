@@ -82,7 +82,7 @@ function normalizeCreatedAt(raw) {
     if (raw && typeof raw.toDate === "function") return raw.toDate().toISOString();
     if (raw instanceof Date) return raw.toISOString();
     if (typeof raw === "string" && !Number.isNaN(Date.parse(raw))) return new Date(raw).toISOString();
-  } catch {}
+  } catch { }
   return null;
 }
 
@@ -178,7 +178,9 @@ export default async function handler(req, res) {
     const usersColSingle = db
       .collection("artifacts")
       .doc("registro-itec-dcbc4")
+      .collection("public")
       .collection("users");
+
 
     const usersGroup = db.collectionGroup("users");
 
@@ -319,9 +321,9 @@ export default async function handler(req, res) {
     // Filtro substring em memória (sobre a página ou sobre o conjunto all=1)
     const filtered = qtext
       ? items.filter(u =>
-          [u.email, u.name, u.phone, u.source]
-            .some(v => String(v || "").toLowerCase().includes(qtext))
-        )
+        [u.email, u.name, u.phone, u.source]
+          .some(v => String(v || "").toLowerCase().includes(qtext))
+      )
       : items;
 
     const afterFilter = filtered.length;
