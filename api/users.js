@@ -52,6 +52,8 @@ function projectUser(u) {
     agCount: u.agCount ?? 0,
     histTotal: u.histTotal ?? 0,
     histPend: u.histPend ?? 0,
+    type: u.type ?? null,
+    polo: u.polo ?? null,
   };
 }
 
@@ -92,11 +94,24 @@ export default async function handler(req, res) {
       const data = doc.data();
       const id = doc.id;
 
-      const [agSnap, histAllSnap, histPendSnap] = await Promise.all([
-        db.collectionGroup("agendamentos").where("idsAlunos", "array-contains", id).get(),
-        db.collectionGroup("historico").where("userId", "==", id).get(),
-        db.collectionGroup("historico").where("userId", "==", id).where("status", "==", "pendente").get()
-      ]);
+      let agCount = 0;
+      let histTotal = 0;
+      let histPend = 0;
+
+      try {
+        const [agSnap, histAllSnap, histPendSnap] = await Promise.all([
+          db.collectionGroup("agendamentos").where("idsAlunos", "array-contains", id).get(),
+          db.collectionGroup("historico").where("userId", "==", id).get(),
+          db.collectionGroup("historico").where("userId", "==", id).where("status", "==", "pendente").get()
+        ]);
+        agCount = agSnap.size;
+        histTotal = histAllSnap.size;
+        histPend = histPendSnap.size;
+      } catch (err) {
+        // Log silently or warn, but don't fail the request.
+        // This is expected if indices are building or missing.
+        console.warn(`[api/users] Failed to fetch stats for user ${id}: ${err.message}`);
+      }
 
       users.push({
         id,
@@ -104,19 +119,21 @@ export default async function handler(req, res) {
         name: data.name || data.userName || data.displayName || null,
         phone: data.phone || data.telefone || null,
         source: data.source || data.origem || null,
+        type: data.type || null,
+        polo: data.polo || null, // New field from index insights
         createdAt: data.createdAt ? data.createdAt.toDate().toISOString() : null,
-        agCount: agSnap.size,
-        histTotal: histAllSnap.size,
-        histPend: histPendSnap.size
+        agCount,
+        histTotal,
+        histPend
       });
     }
 
     // Filtro em memória (na página retornada)
     const filtered = qtext
       ? users.filter(u =>
-          [u.email, u.name, u.phone, u.source]
-            .some(v => String(v || "").toLowerCase().includes(qtext))
-        )
+        [u.email, u.name, u.phone, u.source]
+          .some(v => String(v || "").toLowerCase().includes(qtext))
+      )
       : users;
 
     const last = snap.docs[snap.docs.length - 1];
