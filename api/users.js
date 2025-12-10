@@ -114,6 +114,7 @@ export default async function handler(req, res) {
       }
 
       users.push({
+        ...data,
         id,
         email: data.email || null,
         name: data.name || data.userName || data.displayName || null,
@@ -139,7 +140,7 @@ export default async function handler(req, res) {
     const last = snap.docs[snap.docs.length - 1];
 
     res.status(200).json({
-      items: filtered.map(projectUser),
+      items: filtered,
       nextPageToken: last ? last.id : null,
       pageSize
     });
