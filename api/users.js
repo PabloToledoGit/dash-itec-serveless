@@ -7,7 +7,7 @@ import { getAdminDb } from "./admin.js";
  *  - pageSize (default 25, máx. 100)
  *  - pageToken (id do último doc; apenas scope=single)
  *  - pageCursor (base64 JSON cursor; apenas scope=group)
- *  - sortField (default "createdAt"; whitelist: "createdAt","__name__","email","name")
+ *  - sortField (default "__name__"; whitelist: "createdAt","__name__","email","name")
  *  - sortDir ("asc" | "desc", default "desc")
  *  - q (filtro substring em memória)
  *  - all ("1" para trazer todas as páginas no backend)
@@ -136,7 +136,8 @@ export default async function handler(req, res) {
     const rawPageSize = parseInt(req.query.pageSize || "25", 10);
     const pageSize = Math.min(100, Number.isFinite(rawPageSize) ? rawPageSize : 25);
 
-    const requestedSort = (req.query.sortField || "createdAt").toString();
+    // >>> Default agora é "__name__" para não excluir docs sem createdAt
+    const requestedSort = (req.query.sortField || "__name__").toString();
     const sortField = ALLOWED_SORT.has(requestedSort) ? requestedSort : "__name__";
 
     const sortDir = (req.query.sortDir || "desc").toLowerCase() === "asc" ? "asc" : "desc";
@@ -215,7 +216,13 @@ export default async function handler(req, res) {
 
     } else {
       // ----------------- GROUP SCOPE -----------------
-      // Observação: agrega TODAS as coleções 'users' do projeto.
+      // Ordenação principal por sortField; se sortField != "__name__", encadeamos "__name__" como desempate estável.
+      const buildGroupQuery = () => {
+        let q = usersGroup.orderBy(sortField, sortDir);
+        if (sortField !== "__name__") q = q.orderBy("__name__", sortDir);
+        return q.limit(pageSize);
+      };
+
       if (fetchAll) {
         log("Fetch mode: ALL (group)");
         let cursorVals = null; // { sortVal, nameKey }
@@ -223,8 +230,14 @@ export default async function handler(req, res) {
         let pageIndex = 0;
 
         while (pageIndex < MAX_PAGES) {
-          let q = usersGroup.orderBy(sortField, sortDir).orderBy("__name__", sortDir).limit(pageSize);
-          if (cursorVals) q = q.startAfter(cursorVals.sortVal, db.doc(cursorVals.nameKey));
+          let q = buildGroupQuery();
+          if (cursorVals) {
+            if (sortField === "__name__") {
+              q = q.startAfter(db.doc(cursorVals.nameKey));
+            } else {
+              q = q.startAfter(cursorVals.sortVal, db.doc(cursorVals.nameKey));
+            }
+          }
 
           console.time(`${LOG_PREFIX} pageFetch#${pageIndex}`);
           const snap = await q.get();
@@ -236,20 +249,27 @@ export default async function handler(req, res) {
           console.timeEnd(`${LOG_PREFIX} mapUsers#${pageIndex}`);
 
           const last = snap.docs[snap.docs.length - 1];
-          cursorVals = { sortVal: last.get(sortField) ?? null, nameKey: last.ref.path };
+          cursorVals = {
+            sortVal: sortField === "__name__" ? null : (last.get(sortField) ?? null),
+            nameKey: last.ref.path,
+          };
           if (snap.size < pageSize) break;
           pageIndex += 1;
         }
         pageCount = items.length;
 
       } else {
-        let q = usersGroup.orderBy(sortField, sortDir).orderBy("__name__", sortDir).limit(pageSize);
+        let q = buildGroupQuery();
 
         if (pageCursor) {
           const cur = decodeCursor(pageCursor);
-          if (cur && "sortVal" in cur && "nameKey" in cur) {
+          if (cur && "nameKey" in cur) {
             try {
-              q = q.startAfter(cur.sortVal, db.doc(cur.nameKey));
+              if (sortField === "__name__") {
+                q = q.startAfter(db.doc(cur.nameKey));
+              } else {
+                q = q.startAfter(cur.sortVal ?? null, db.doc(cur.nameKey));
+              }
               log("Using pageCursor startAfter (group)", cur);
             } catch (e) {
               warn("Invalid pageCursor, ignoring (group)", { error: e.message });
@@ -271,7 +291,7 @@ export default async function handler(req, res) {
         if (snap.size === pageSize && snap.docs.length) {
           const last = snap.docs[snap.docs.length - 1];
           nextPageCursor = encodeCursor({
-            sortVal: last.get(sortField) ?? null,
+            sortVal: sortField === "__name__" ? null : (last.get(sortField) ?? null),
             nameKey: last.ref.path,
           });
         } else {
