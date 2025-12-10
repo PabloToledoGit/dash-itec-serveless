@@ -11,13 +11,20 @@ import { getAdminDb } from "./admin.js";
  *  - sortDir ("asc" | "desc", default "desc")
  *  - q (filtro substring em memória)
  *  - all ("1" para trazer todas as páginas no backend)
- *  - scope ("single" | "group"; default "single")
- *  - publicDocId (opcional) -> usa artifacts/{artifactId}/public/{publicDocId}/users
+ *  - scope ("single" | "group"; default "group")
+ *  - publicDocId (opcional) -> usa artifacts/{artifactId}/public/{publicDocId}/users (prioridade sobre env)
+ *
+ * ENVs:
+ *  - ARTIFACT_ID (default: "registro-itec-dcbc4")
+ *  - PUBLIC_DOC_ID (opcional; se setado vira default do caminho public/{PUBLIC_DOC_ID}/users)
+ *  - ORIGIN_ALLOWLIST (CORS)
+ *  - LOG_VERBOSE ("1" default)
  */
 
 const LOG_PREFIX = "[api/users]";
 const VERBOSE = (process.env.LOG_VERBOSE || "1") !== "0";
 const ARTIFACT_ID = process.env.ARTIFACT_ID || "registro-itec-dcbc4";
+const PUBLIC_DOC_ID_DEFAULT = (process.env.PUBLIC_DOC_ID || "").trim();
 
 function log(...args) { if (VERBOSE) console.log(LOG_PREFIX, ...args); }
 function warn(...args) { console.warn(LOG_PREFIX, ...args); }
@@ -70,7 +77,7 @@ function normalizeCreatedAt(raw) {
 }
 const ALLOWED_SORT = new Set(["createdAt", "__name__", "email", "name"]);
 
-// ---- Stats por usuário (considere pré-agregação)
+// ---- Stats por usuário (considere pré-agregação para alta escala)
 async function fetchStatsForUser(db, userId) {
   let agCount = 0, histTotal = 0, histPend = 0;
   try {
@@ -112,16 +119,17 @@ function decodeCursor(s) {
 }
 
 // ---- Resolve CollectionReference dos usuários, conforme publicDocId
-function getUsersCollection(db, artifactId, publicDocId) {
+function getUsersCollection(db, artifactId, publicDocIdParam) {
   const baseDoc = db.collection("artifacts").doc(artifactId);
+  const publicDocId = (publicDocIdParam || PUBLIC_DOC_ID_DEFAULT).trim();
   if (publicDocId) {
     // artifacts/{artifactId}/public/{publicDocId}/users
     const users = baseDoc.collection("public").doc(publicDocId).collection("users");
-    return { usersColSingle: users, pathMode: "public" };
+    return { usersColSingle: users, pathMode: "public", usedPublicDocId: publicDocId };
   }
   // artifacts/{artifactId}/users
   const users = baseDoc.collection("users");
-  return { usersColSingle: users, pathMode: "direct" };
+  return { usersColSingle: users, pathMode: "direct", usedPublicDocId: "" };
 }
 
 export default async function handler(req, res) {
@@ -136,7 +144,7 @@ export default async function handler(req, res) {
     const rawPageSize = parseInt(req.query.pageSize || "25", 10);
     const pageSize = Math.min(100, Number.isFinite(rawPageSize) ? rawPageSize : 25);
 
-    // >>> Default agora é "__name__" para não excluir docs sem createdAt
+    // Default = "__name__" para não excluir docs sem createdAt
     const requestedSort = (req.query.sortField || "__name__").toString();
     const sortField = ALLOWED_SORT.has(requestedSort) ? requestedSort : "__name__";
 
@@ -145,16 +153,17 @@ export default async function handler(req, res) {
     const pageToken = (req.query.pageToken || "").toString().trim();   // single
     const pageCursor = (req.query.pageCursor || "").toString().trim(); // group
     const fetchAll = (req.query.all || "") === "1";
-    const scope = ((req.query.scope || "single").toString() === "group") ? "group" : "single";
-    const publicDocId = (req.query.publicDocId || "").toString().trim();
+    // Default agora é "group"
+    const scope = ((req.query.scope || "group").toString() === "single") ? "single" : "group";
+    const publicDocIdQuery = (req.query.publicDocId || "").toString().trim();
 
     log("Request params", {
-      pageSize, sortField, sortDir, qtext, pageToken, pageCursor, all: fetchAll, scope, publicDocId
+      pageSize, sortField, sortDir, qtext, pageToken, pageCursor, all: fetchAll, scope,
+      publicDocIdQuery, PUBLIC_DOC_ID_DEFAULT
     });
 
-    // ---- paths
-    const { usersColSingle, pathMode } = getUsersCollection(db, ARTIFACT_ID, publicDocId);
-    const usersGroup = db.collectionGroup("users"); // para scope=group (agrega qualquer /users)
+    const { usersColSingle, pathMode, usedPublicDocId } = getUsersCollection(db, ARTIFACT_ID, publicDocIdQuery);
+    const usersGroup = db.collectionGroup("users"); // escopo agregado
 
     let items = [];
     let pageCount = 0;
@@ -164,7 +173,7 @@ export default async function handler(req, res) {
     if (scope === "single") {
       // ----------------- SINGLE SCOPE -----------------
       if (fetchAll) {
-        log(`Fetch mode: ALL (single, ${pathMode})`);
+        log(`Fetch mode: ALL (single, ${pathMode}, publicDocId=${usedPublicDocId || "-"})`);
         let cursorDoc = null;
         const MAX_PAGES = 500;
 
@@ -184,10 +193,9 @@ export default async function handler(req, res) {
           cursorDoc = snap.docs[snap.docs.length - 1];
           if (snap.size < pageSize) break;
         }
-        pageCount = items.length; // apenas para header
+        pageCount = items.length;
 
       } else {
-        // página única
         let q = usersColSingle.orderBy(sortField, sortDir).limit(pageSize);
         if (pageToken) {
           const tokenSnap = await usersColSingle.doc(pageToken).get();
@@ -215,7 +223,7 @@ export default async function handler(req, res) {
       }
 
     } else {
-      // ----------------- GROUP SCOPE -----------------
+      // ----------------- GROUP SCOPE (DEFAULT) -----------------
       // Ordenação principal por sortField; se sortField != "__name__", encadeamos "__name__" como desempate estável.
       const buildGroupQuery = () => {
         let q = usersGroup.orderBy(sortField, sortDir);
@@ -235,7 +243,7 @@ export default async function handler(req, res) {
             if (sortField === "__name__") {
               q = q.startAfter(db.doc(cursorVals.nameKey));
             } else {
-              q = q.startAfter(cursorVals.sortVal, db.doc(cursorVals.nameKey));
+              q = q.startAfter(cursorVals.sortVal ?? null, db.doc(cursorVals.nameKey));
             }
           }
 
@@ -274,7 +282,7 @@ export default async function handler(req, res) {
             } catch (e) {
               warn("Invalid pageCursor, ignoring (group)", { error: e.message });
             }
-          } else {
+          } else if (pageCursor) {
             warn("Malformed pageCursor, ignoring (group)");
           }
         }
@@ -322,6 +330,7 @@ export default async function handler(req, res) {
     log("Response summary", {
       scope,
       pathMode,
+      usedPublicDocId,
       totalBeforeFilter: beforeFilter,
       totalAfterFilter: filtered.length,
       pageSize,
@@ -335,6 +344,7 @@ export default async function handler(req, res) {
     res.setHeader("X-Has-More", responsePayload.hasMore ? "1" : "0");
     res.setHeader("X-Scope", scope);
     res.setHeader("X-Path-Mode", pathMode);
+    res.setHeader("X-Public-DocId", usedPublicDocId || "-");
 
     return res.status(200).json(responsePayload);
   } catch (err) {
