@@ -57,7 +57,7 @@ function normalizeCreatedAt(raw) {
     if (raw && typeof raw.toDate === "function") return raw.toDate().toISOString();
     if (raw instanceof Date) return raw.toISOString();
     if (typeof raw === "string" && !Number.isNaN(Date.parse(raw))) return new Date(raw).toISOString();
-  } catch {}
+  } catch { }
   return null;
 }
 
@@ -159,7 +159,7 @@ export default async function handler(req, res) {
   try {
     const db = getAdminDb();
 
-    const pageSize = Math.min(100, parseInt(req.query.pageSize || "25", 10));
+    const pageSize = Math.min(1000, parseInt(req.query.pageSize || "25", 10));
     const sortField = (req.query.sortField || "__name__").toString();
     const sortDir = (req.query.sortDir || "desc").toLowerCase() === "asc" ? "asc" : "desc";
     const qtext = (req.query.q || "").toString().trim().toLowerCase();
@@ -213,8 +213,8 @@ export default async function handler(req, res) {
     // Filtro de busca textual (q)
     const filtered = qtext
       ? items.filter(u =>
-          [u.email, u.name, u.phone, u.source]
-            .some(v => String(v || "").toLowerCase().includes(qtext)))
+        [u.email, u.name, u.phone, u.source]
+          .some(v => String(v || "").toLowerCase().includes(qtext)))
       : items;
 
     const sample = filtered.slice(0, 5).map(u => ({ id: u.id, email: u.email, name: u.name }));
